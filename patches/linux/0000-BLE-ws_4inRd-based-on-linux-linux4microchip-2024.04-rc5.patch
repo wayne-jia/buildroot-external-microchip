@@ -1,0 +1,870 @@
+diff --git a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+index c4758083219c..9dadb3e2f226 100644
+--- a/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
++++ b/arch/arm/boot/dts/microchip/at91-sam9x75_curiosity.dts
+@@ -121,11 +121,69 @@ &ehci0 {
+ 	status = "okay";
+ };
+ 
++&flx1 {
++	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_USART>;
++	status = "okay";
++
++	uart1: serial@200 {
++		pinctrl-names = "default";
++		pinctrl-0 = <&pinctrl_flx1_usart_default>;
++		status = "okay";
++	};
++};
++
+ &flx6 {
+ 	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_TWI>;
+ 	status = "okay";
+ };
+ 
++&dsi {
++	status = "okay";
++	#address-cells = <1>;
++	#size-cells = <0>;
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		port@0 {
++			reg = <0>;
++			dsi_in: endpoint {
++				remote-endpoint = <&hlcdc_panel_output>;
++			};
++		};
++
++		port@1 {
++			reg = <1>;
++			dsi_out: endpoint {
++				remote-endpoint = <&mipi_in_panel>;
++			};
++		};
++	};
++};
++
++&hlcdc {
++	clocks = <&pmc PMC_TYPE_PERIPHERAL 25>, <&pmc PMC_TYPE_GCK 25>, <&clk32k 1>;
++	clock-names = "periph_clk", "sys_clk", "slow_clk";
++	assigned-clocks = <&pmc PMC_TYPE_GCK 25>;
++	assigned-clock-rates = <50000000>;
++	status = "okay";
++
++	hlcdc-display-controller {
++		port@0 {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			hlcdc_panel_output: endpoint@0 {
++				reg = <0>;
++				remote-endpoint = <&dsi_in>;
++			};
++		};
++	};
++
++	hlcdc_pwm: hlcdc-pwm {
++		status = "disabled";
++	};
++};
++
+ &i2c6 {
+ 	#address-cells = <1>;
+ 	#size-cells = <0>;
+@@ -136,6 +194,25 @@ &i2c6 {
+ 	i2c-digital-filter-width-ns = <35>;
+ 	status = "okay";
+ 
++	panel: panel_disp@45 {
++		reg = <0x45>;
++		compatible = "waveshare,4inch-panel";
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			mipi_in_panel: endpoint {
++				remote-endpoint = <&dsi_out>;
++			};
++		};
++	};
++
++	touch: goodix@14 {
++		reg = <0x14>;
++		compatible = "goodix,gt911";
++	};
++
+ 	pmic@5b {
+ 		compatible = "microchip,mcp16502";
+ 		reg = <0x5b>;
+@@ -325,6 +402,11 @@ pinctrl_flx6_twi_default: flx6-twi-default {
+ 				<AT91_PIOA 24 AT91_PERIPH_A AT91_PINCTRL_PULL_UP
+ 				 AT91_PIOA 25 AT91_PERIPH_A AT91_PINCTRL_PULL_UP>;
+ 		};
++		pinctrl_flx1_usart_default: mikrobus-uart {
++			atmel,pins = 
++			    <AT91_PIOA 29 AT91_PERIPH_A AT91_PINCTRL_PULL_UP
++				 AT91_PIOA 28 AT91_PERIPH_A AT91_PINCTRL_NONE>;
++		};
+ 	};
+ 
+ 	gpio-keys {
+diff --git a/drivers/clk/at91/sam9x7.c b/drivers/clk/at91/sam9x7.c
+index 5fb4ddb76856..f6e5d7af46d5 100644
+--- a/drivers/clk/at91/sam9x7.c
++++ b/drivers/clk/at91/sam9x7.c
+@@ -583,8 +583,8 @@ static const struct {
+ 		.n = "lcd_gclk",
+ 		.id = 25,
+ 		.r = { .max = 75000000 },
+-		.pp = { "audiopll_divpmcck", "plla_div2pmcck", },
+-		.pp_mux_table = { 6, 8, },
++		.pp = { "plla_div2pmcck", "audiopll_divpmcck", },
++		.pp_mux_table = { 8, 6, },
+ 		.pp_count = 2,
+ 		.pp_chg_id = INT_MIN,
+ 	},
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index ec4abf9ff47b..f27754414955 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -37,6 +37,7 @@ config DRM_MIPI_DBI
+ 
+ config DRM_MIPI_DSI
+ 	bool
++	default y
+ 	depends on DRM
+ 
+ config DRM_DEBUG_MM
+diff --git a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_crtc.c b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_crtc.c
+index 404ae3958e4e..717da00202e8 100644
+--- a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_crtc.c
++++ b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_crtc.c
+@@ -78,7 +78,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
+ 	unsigned long mode_rate;
+ 	struct videomode vm;
+ 	unsigned long prate;
+-	unsigned int mask = ATMEL_HLCDC_CLKDIV_MASK | ATMEL_HLCDC_CLKPOL;
++	unsigned int mask = ATMEL_HLCDC_CLKDIV_MASK | ATMEL_HLCDC_CLKPOL | ATMEL_XLCDC_CLKBYP;
+ 	unsigned int cfg = 0;
+ 	int div, ret;
+ 	bool is_xlcdc = crtc->dc->desc->is_xlcdc;
+@@ -121,7 +121,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
+ 		     (vm.hsync_len - 1) | ((vm.vsync_len - 1) << 16));
+ 
+ 	regmap_write(regmap, ATMEL_HLCDC_CFG(2),
+-		     (vm.vfront_porch - 1) | (vm.vback_porch << 16));
++		     (vm.vfront_porch - 1) | ((vm.vback_porch - 1) << 16));
+ 
+ 	regmap_write(regmap, ATMEL_HLCDC_CFG(3),
+ 		     (vm.hfront_porch - 1) | ((vm.hback_porch - 1) << 16));
+@@ -179,6 +179,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
+ 	    connector->display_info.bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE)
+ 		cfg |= ATMEL_HLCDC_CLKPOL;
+ 
++	cfg = 0x00000003;
+ 	regmap_update_bits(regmap, ATMEL_HLCDC_CFG(0), mask, cfg);
+ 
+ 	state = drm_crtc_state_to_atmel_hlcdc_crtc_state(c->state);
+@@ -192,6 +193,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
+ 	if (!is_xlcdc && (adj->flags & DRM_MODE_FLAG_NHSYNC))
+ 		cfg |= ATMEL_HLCDC_HSPOL;
+ 
++	cfg = 0x10d94;
+ 	regmap_update_bits(regmap, ATMEL_HLCDC_CFG(5),
+ 			   ATMEL_HLCDC_HSPOL | ATMEL_HLCDC_VSPOL |
+ 			   ATMEL_HLCDC_VSPDLYS | ATMEL_HLCDC_VSPDLYE |
+diff --git a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_dc.c b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_dc.c
+index d077e226d0d3..694ac2e8cb21 100644
+--- a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_dc.c
++++ b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_dc.c
+@@ -551,8 +551,8 @@ static const struct atmel_hlcdc_layer_desc atmel_xlcdc_sam9x75_layers[] = {
+ static const struct atmel_hlcdc_dc_desc atmel_xlcdc_dc_sam9x75 = {
+ 	.min_width = 0,
+ 	.min_height = 0,
+-	.max_width = 2048,
+-	.max_height = 2048,
++	.max_width = 720,
++	.max_height = 14065,
+ 	.max_spw = 0xff,
+ 	.max_vpw = 0xff,
+ 	.max_hpw = 0x3ff,
+diff --git a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_plane.c b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_plane.c
+index 0483c442c120..056eb04f657f 100644
+--- a/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_plane.c
++++ b/drivers/gpu/drm/atmel-hlcdc/atmel_hlcdc_plane.c
+@@ -486,7 +486,7 @@ void atmel_xlcdc_plane_update_general_settings(struct atmel_hlcdc_plane *plane,
+ 		       ATMEL_XLCDC_LAYER_SFACTA_ONE |
+ 		       ATMEL_XLCDC_LAYER_DFACTC_M_A0_MULT_AS |
+ 		       ATMEL_XLCDC_LAYER_DFACTA_ONE;
+-		if (format->has_alpha)
++		if (!format->has_alpha)
+ 			cfg |= ATMEL_XLCDC_LAYER_A0(0xff);
+ 		else
+ 			cfg |= ATMEL_XLCDC_LAYER_A0(state->base.alpha);
+diff --git a/drivers/gpu/drm/bridge/dw-mipi-dsi-mchp.c b/drivers/gpu/drm/bridge/dw-mipi-dsi-mchp.c
+index b2d2d8254675..aef292e9c609 100644
+--- a/drivers/gpu/drm/bridge/dw-mipi-dsi-mchp.c
++++ b/drivers/gpu/drm/bridge/dw-mipi-dsi-mchp.c
+@@ -316,7 +316,7 @@ static int dw_mipi_dsi_mchp_get_lane_mbps(void *priv_data,
+ 	mpclk = DIV_ROUND_UP(mode->clock, MSEC_PER_SEC);
+ 	if (mpclk) {
+ 		/* take 1/0.8, since mbps must be bigger than bandwidth of RGB */
+-		desired_mbps = mpclk * (bpp / lanes) * 10 / 8;
++		desired_mbps = mpclk * (bpp / lanes);
+ 		if (desired_mbps < max_mbps) {
+ 			target_mbps = desired_mbps;
+ 		} else {
+@@ -521,7 +521,7 @@ static int dw_mipi_dsi_mchp_remove(struct platform_device *pdev)
+ }
+ 
+ static const struct dw_mipi_dsi_mchp_chip_data sam9x75_chip_data = {
+-	.max_data_lanes = 4,
++	.max_data_lanes = 2,
+ 	.phy_ops = &dw_mipi_dsi_mchp_phy_ops,
+ };
+ 
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index 869e535faefa..aabe388b2764 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -826,6 +826,16 @@ config DRM_PANEL_WIDECHIPS_WS2401
+ 	  480x800 display controller used in panels such as Samsung LMS380KF01.
+ 	  This display is used in the Samsung Galaxy Ace 2 GT-I8160 (Codina).
+ 
++config DRM_PANEL_WAVESHARE_TOUCHSCREEN
++	tristate "Waveshare touchscreen panels"
++	depends on DRM_MIPI_DSI
++	depends on I2C
++	depends on BACKLIGHT_CLASS_DEVICE
++	help
++	  Say Y here if you want to enable support for the Waveshare
++	  DSI Touchscreens.  To compile this driver as a module,
++	  choose M here.
++
+ config DRM_PANEL_XINPENG_XPP055C272
+ 	tristate "Xinpeng XPP055C272 panel driver"
+ 	depends on OF
+diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
+index 433e93d57949..2045fa40c7b0 100644
+--- a/drivers/gpu/drm/panel/Makefile
++++ b/drivers/gpu/drm/panel/Makefile
+@@ -84,4 +84,5 @@ obj-$(CONFIG_DRM_PANEL_VISIONOX_RM69299) += panel-visionox-rm69299.o
+ obj-$(CONFIG_DRM_PANEL_VISIONOX_VTDR6130) += panel-visionox-vtdr6130.o
+ obj-$(CONFIG_DRM_PANEL_VISIONOX_R66451) += panel-visionox-r66451.o
+ obj-$(CONFIG_DRM_PANEL_WIDECHIPS_WS2401) += panel-widechips-ws2401.o
++obj-$(CONFIG_DRM_PANEL_WAVESHARE_TOUCHSCREEN) += panel-waveshare-dsi.o
+ obj-$(CONFIG_DRM_PANEL_XINPENG_XPP055C272) += panel-xinpeng-xpp055c272.o
+diff --git a/drivers/gpu/drm/panel/panel-waveshare-dsi.c b/drivers/gpu/drm/panel/panel-waveshare-dsi.c
+new file mode 100755
+index 000000000000..9e641f9a506d
+--- /dev/null
++++ b/drivers/gpu/drm/panel/panel-waveshare-dsi.c
+@@ -0,0 +1,436 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright © 2023 Raspberry Pi Ltd
++ *
++ * Based on panel-raspberrypi-touchscreen by Broadcom
++ */
++
++#include <linux/backlight.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/fb.h>
++#include <linux/i2c.h>
++#include <linux/media-bus-format.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++#include <linux/of_graph.h>
++#include <linux/pm.h>
++
++#include <drm/drm_crtc.h>
++#include <drm/drm_device.h>
++#include <drm/drm_mipi_dsi.h>
++#include <drm/drm_panel.h>
++
++#define WS_DSI_DRIVER_NAME "ws-ts-dsi"
++
++struct ws_panel {
++	struct drm_panel base;
++	struct mipi_dsi_device *dsi;
++	struct i2c_client *i2c;
++	const struct drm_display_mode *mode;
++	enum drm_panel_orientation orientation;
++};
++
++/* 2.8inch 480x640
++ * https://www.waveshare.com/product/raspberry-pi/displays/2.8inch-dsi-lcd.htm
++ */
++static const struct drm_display_mode ws_panel_2_8_mode = {
++	.clock = 50000,
++	.hdisplay = 480,
++	.hsync_start = 480 + 150,
++	.hsync_end = 480 + 150 + 50,
++	.htotal = 480 + 150 + 50 + 150,
++	.vdisplay = 640,
++	.vsync_start = 640 + 150,
++	.vsync_end = 640 + 150 + 50,
++	.vtotal = 640 + 150 + 50 + 150,
++};
++
++/* 3.4inch 800x800 Round
++ * https://www.waveshare.com/product/displays/lcd-oled/3.4inch-dsi-lcd-c.htm
++ */
++static const struct drm_display_mode ws_panel_3_4_mode = {
++	.clock = 50000,
++	.hdisplay = 800,
++	.hsync_start = 800 + 32,
++	.hsync_end = 800 + 32 + 6,
++	.htotal = 800 + 32 + 6 + 120,
++	.vdisplay = 800,
++	.vsync_start = 800 + 8,
++	.vsync_end = 800 + 8 + 4,
++	.vtotal = 800 + 8 + 4 + 16,
++};
++
++/* 4.0inch 480x800
++ * https://www.waveshare.com/product/raspberry-pi/displays/4inch-dsi-lcd.htm
++ */
++static const struct drm_display_mode ws_panel_4_0_mode = {
++	.clock = 50000,
++	.hdisplay = 480,
++	.hsync_start = 480 + 150,
++	.hsync_end = 480 + 150 + 100,
++	.htotal = 480 + 150 + 100 + 150,
++	.vdisplay = 800,
++	.vsync_start = 800 + 20,
++	.vsync_end = 800 + 20 + 100,
++	.vtotal = 800 + 20 + 100 + 20,
++};
++
++/* 7.0inch C 1024x600
++ * https://www.waveshare.com/product/raspberry-pi/displays/lcd-oled/7inch-dsi-lcd-c-with-case-a.htm
++ */
++static const struct drm_display_mode ws_panel_7_0_c_mode = {
++	.clock = 50000,
++	.hdisplay = 1024,
++	.hsync_start = 1024 + 100,
++	.hsync_end = 1024 + 100 + 100,
++	.htotal = 1024 + 100 + 100 + 100,
++	.vdisplay = 600,
++	.vsync_start = 600 + 10,
++	.vsync_end = 600 + 10 + 10,
++	.vtotal = 600 + 10 + 10 + 10,
++};
++
++/* 7.9inch 400x1280
++ * https://www.waveshare.com/product/raspberry-pi/displays/7.9inch-dsi-lcd.htm
++ */
++static const struct drm_display_mode ws_panel_7_9_mode = {
++	.clock = 50000,
++	.hdisplay = 400,
++	.hsync_start = 400 + 40,
++	.hsync_end = 400 + 40 + 30,
++	.htotal = 400 + 40 + 30 + 40,
++	.vdisplay = 1280,
++	.vsync_start = 1280 + 20,
++	.vsync_end = 1280 + 20 + 10,
++	.vtotal = 1280 + 20 + 10 + 20,
++};
++
++/* 8.0inch or 10.1inch 1280x800
++ * https://www.waveshare.com/product/raspberry-pi/displays/8inch-dsi-lcd-c.htm
++ * https://www.waveshare.com/product/raspberry-pi/displays/10.1inch-dsi-lcd-c.htm
++ */
++static const struct drm_display_mode ws_panel_10_1_mode = {
++	.clock = 83333,
++	.hdisplay = 1280,
++	.hsync_start = 1280 + 156,
++	.hsync_end = 1280 + 156 + 20,
++	.htotal = 1280 + 156 + 20 + 40,
++	.vdisplay = 800,
++	.vsync_start = 800 + 40,
++	.vsync_end = 800 + 40 + 48,
++	.vtotal = 800 + 40 + 48 + 40,
++};
++
++/* 11.9inch 320x1480
++ * https://www.waveshare.com/product/raspberry-pi/displays/11.9inch-dsi-lcd.htm
++ */
++static const struct drm_display_mode ws_panel_11_9_mode = {
++	.clock = 50000,
++	.hdisplay = 320,
++	.hsync_start = 320 + 60,
++	.hsync_end = 320 + 60 + 60,
++	.htotal = 320 + 60 + 60 + 60,
++	.vdisplay = 1480,
++	.vsync_start = 1480 + 60,
++	.vsync_end = 1480 + 60 + 60,
++	.vtotal = 1480 + 60 + 60 + 60,
++};
++
++static const struct drm_display_mode ws_panel_4_mode = {
++	.clock = 50000,
++	.hdisplay = 720,
++	.hsync_start = 720 + 32,
++	.hsync_end = 720 + 32 + 200,
++	.htotal = 720 + 32 + 200 + 120,
++	.vdisplay = 720,
++	.vsync_start = 720 + 8,
++	.vsync_end = 720 + 8 + 4,
++	.vtotal = 720 + 8 + 4 + 16,
++};
++
++static struct ws_panel *panel_to_ts(struct drm_panel *panel)
++{
++	return container_of(panel, struct ws_panel, base);
++}
++
++static void ws_panel_i2c_write(struct ws_panel *ts, u8 reg, u8 val)
++{
++	return; //Not send i2c command to WS panel here because bootstrap already init WS panel in bootstrap
++	
++	int ret;
++
++	ret = i2c_smbus_write_byte_data(ts->i2c, reg, val);
++	if (ret)
++		dev_err(&ts->i2c->dev, "I2C write failed: %d\n", ret);
++}
++
++static int ws_panel_disable(struct drm_panel *panel)
++{
++	struct ws_panel *ts = panel_to_ts(panel);
++
++	ws_panel_i2c_write(ts, 0xad, 0x00);
++
++	return 0;
++}
++
++static int ws_panel_unprepare(struct drm_panel *panel)
++{
++	return 0;
++}
++
++static int ws_panel_prepare(struct drm_panel *panel)
++{
++	return 0;
++}
++
++static int ws_panel_enable(struct drm_panel *panel)
++{
++	struct ws_panel *ts = panel_to_ts(panel);
++
++	ws_panel_i2c_write(ts, 0xad, 0x01);
++
++	return 0;
++}
++
++static int ws_panel_get_modes(struct drm_panel *panel,
++			      struct drm_connector *connector)
++{
++	static const u32 bus_format = MEDIA_BUS_FMT_RGB888_1X24;
++	struct ws_panel *ts = panel_to_ts(panel);
++	struct drm_display_mode *mode;
++
++	mode = drm_mode_duplicate(connector->dev, ts->mode);
++	if (!mode) {
++		dev_err(panel->dev, "failed to add mode %ux%u@%u\n",
++			ts->mode->hdisplay,
++			ts->mode->vdisplay,
++			drm_mode_vrefresh(ts->mode));
++	}
++
++	mode->type |= DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
++
++	drm_mode_set_name(mode);
++
++	drm_mode_probed_add(connector, mode);
++
++	connector->display_info.bpc = 8;
++	connector->display_info.width_mm = 154;
++	connector->display_info.height_mm = 86;
++	drm_display_info_set_bus_formats(&connector->display_info,
++					 &bus_format, 1);
++
++	/*
++	 * TODO: Remove once all drm drivers call
++	 * drm_connector_set_orientation_from_panel()
++	 */
++	drm_connector_set_panel_orientation(connector, ts->orientation);
++
++	return 1;
++}
++
++static enum drm_panel_orientation ws_panel_get_orientation(struct drm_panel *panel)
++{
++	struct ws_panel *ts = panel_to_ts(panel);
++
++	return ts->orientation;
++}
++
++static const struct drm_panel_funcs ws_panel_funcs = {
++	.disable = ws_panel_disable,
++	.unprepare = ws_panel_unprepare,
++	.prepare = ws_panel_prepare,
++	.enable = ws_panel_enable,
++	.get_modes = ws_panel_get_modes,
++	.get_orientation = ws_panel_get_orientation,
++};
++
++static int ws_panel_bl_update_status(struct backlight_device *bl)
++{
++	struct ws_panel *ts = bl_get_data(bl);
++
++	ws_panel_i2c_write(ts, 0xab, 0xff - backlight_get_brightness(bl));
++	ws_panel_i2c_write(ts, 0xaa, 0x01);
++
++	return 0;
++}
++
++static const struct backlight_ops ws_panel_bl_ops = {
++	.update_status = ws_panel_bl_update_status,
++};
++
++static struct backlight_device *
++ws_panel_create_backlight(struct ws_panel *ts)
++{
++	struct device *dev = ts->base.dev;
++	const struct backlight_properties props = {
++		.type = BACKLIGHT_RAW,
++		.brightness = 255,
++		.max_brightness = 255,
++	};
++
++	return devm_backlight_device_register(dev, dev_name(dev), dev, ts,
++					      &ws_panel_bl_ops, &props);
++}
++
++static int ws_panel_probe(struct i2c_client *i2c)
++{
++	struct device *dev = &i2c->dev;
++	struct ws_panel *ts;
++	struct device_node *endpoint, *dsi_host_node;
++	struct mipi_dsi_host *host;
++	struct mipi_dsi_device_info info = {
++		.type = WS_DSI_DRIVER_NAME,
++		.channel = 0,
++		.node = NULL,
++	};
++	int ret;
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->mode = of_device_get_match_data(dev);
++	if (!ts->mode)
++		return -EINVAL;
++
++	i2c_set_clientdata(i2c, ts);
++
++	ts->i2c = i2c;
++
++	ws_panel_i2c_write(ts, 0xc0, 0x01);
++	ws_panel_i2c_write(ts, 0xc2, 0x01);
++	ws_panel_i2c_write(ts, 0xac, 0x01);
++
++	ret = of_drm_get_panel_orientation(dev->of_node, &ts->orientation);
++	if (ret) {
++		dev_err(dev, "%pOF: failed to get orientation %d\n", dev->of_node, ret);
++		return ret;
++	}
++
++	/* Look up the DSI host.  It needs to probe before we do. */
++	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
++	if (!endpoint)
++		return -ENODEV;
++
++	dsi_host_node = of_graph_get_remote_port_parent(endpoint);
++	if (!dsi_host_node)
++		goto error;
++
++	host = of_find_mipi_dsi_host_by_node(dsi_host_node);
++	of_node_put(dsi_host_node);
++	if (!host) {
++		of_node_put(endpoint);
++		return -EPROBE_DEFER;
++	}
++
++	info.node = of_graph_get_remote_port(endpoint);
++	if (!info.node)
++		goto error;
++
++	of_node_put(endpoint);
++
++	ts->dsi = devm_mipi_dsi_device_register_full(dev, host, &info);
++	if (IS_ERR(ts->dsi)) {
++		dev_err(dev, "DSI device registration failed: %ld\n",
++			PTR_ERR(ts->dsi));
++		return PTR_ERR(ts->dsi);
++	}
++
++	drm_panel_init(&ts->base, dev, &ws_panel_funcs,
++		       DRM_MODE_CONNECTOR_DSI);
++
++	ts->base.backlight = ws_panel_create_backlight(ts);
++	if (IS_ERR(ts->base.backlight)) {
++		ret = PTR_ERR(ts->base.backlight);
++		dev_err(dev, "Failed to create backlight: %d\n", ret);
++		return ret;
++	}
++
++	/* This appears last, as it's what will unblock the DSI host
++	 * driver's component bind function.
++	 */
++	drm_panel_add(&ts->base);
++
++	ts->dsi->mode_flags =  MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
++			   MIPI_DSI_CLOCK_NON_CONTINUOUS;
++	ts->dsi->format = MIPI_DSI_FMT_RGB888;
++	ts->dsi->lanes = 2;
++
++	ret = devm_mipi_dsi_attach(dev, ts->dsi);
++
++	if (ret)
++		dev_err(dev, "failed to attach dsi to host: %d\n", ret);
++
++	return 0;
++
++error:
++	of_node_put(endpoint);
++	return -ENODEV;
++}
++
++static void ws_panel_remove(struct i2c_client *i2c)
++{
++	struct ws_panel *ts = i2c_get_clientdata(i2c);
++
++	ws_panel_disable(&ts->base);
++
++	drm_panel_remove(&ts->base);
++}
++
++static void ws_panel_shutdown(struct i2c_client *i2c)
++{
++	struct ws_panel *ts = i2c_get_clientdata(i2c);
++
++	ws_panel_disable(&ts->base);
++}
++
++static const struct of_device_id ws_panel_of_ids[] = {
++	{
++		.compatible = "waveshare,2.8inch-panel",
++		.data = &ws_panel_2_8_mode,
++	}, {
++		.compatible = "waveshare,3.4inch-panel",
++		.data = &ws_panel_3_4_mode,
++	}, {
++		.compatible = "waveshare,4.0inch-panel",
++		.data = &ws_panel_4_0_mode,
++	}, {
++		.compatible = "waveshare,7.0inch-c-panel",
++		.data = &ws_panel_7_0_c_mode,
++	}, {
++		.compatible = "waveshare,7.9inch-panel",
++		.data = &ws_panel_7_9_mode,
++	}, {
++		.compatible = "waveshare,8.0inch-panel",
++		.data = &ws_panel_10_1_mode,
++	}, {
++		.compatible = "waveshare,10.1inch-panel",
++		.data = &ws_panel_10_1_mode,
++	}, {
++		.compatible = "waveshare,11.9inch-panel",
++		.data = &ws_panel_11_9_mode,
++	}, {
++		.compatible = "waveshare,4inch-panel",
++		.data = &ws_panel_4_mode,
++	}, {
++		/* sentinel */
++	}
++};
++MODULE_DEVICE_TABLE(of, ws_panel_of_ids);
++
++static struct i2c_driver ws_panel_driver = {
++	.driver = {
++		.name = "ws_touchscreen",
++		.of_match_table = ws_panel_of_ids,
++	},
++	.probe = ws_panel_probe,
++	.remove = ws_panel_remove,
++	.shutdown = ws_panel_shutdown,
++};
++module_i2c_driver(ws_panel_driver);
++
++MODULE_AUTHOR("Dave Stevenson <dave.stevenson@raspberrypi.com>");
++MODULE_DESCRIPTION("Waveshare DSI panel driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/input/touchscreen/goodix.c b/drivers/input/touchscreen/goodix.c
+index b068ff8afbc9..23134a20ef50 100644
+--- a/drivers/input/touchscreen/goodix.c
++++ b/drivers/input/touchscreen/goodix.c
+@@ -48,6 +48,8 @@
+ #define MAX_CONTACTS_LOC	5
+ #define TRIGGER_LOC		6
+ 
++#define POLL_INTERVAL_MS		17	/* 17ms = 60fps */
++
+ /* Our special handling for GPIO accesses through ACPI is x86 specific */
+ #if defined CONFIG_X86 && defined CONFIG_ACPI
+ #define ACPI_GPIO_SUPPORT
+@@ -513,16 +515,67 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
+ 	return IRQ_HANDLED;
+ }
+ 
++static void goodix_ts_irq_poll_timer(struct timer_list *t)
++{
++	struct goodix_ts_data *ts = from_timer(ts, t, timer);
++
++	schedule_work(&ts->work_i2c_poll);
++	mod_timer(&ts->timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
++}
++
++static void goodix_ts_work_i2c_poll(struct work_struct *work)
++{
++	struct goodix_ts_data *ts = container_of(work,
++			struct goodix_ts_data, work_i2c_poll);
++
++	goodix_process_events(ts);
++	goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0);
++}
++
++static void goodix_enable_irq(struct goodix_ts_data *ts)
++{
++	if (ts->client->irq) {
++		enable_irq(ts->client->irq);
++	} else {
++		ts->timer.expires = jiffies + msecs_to_jiffies(POLL_INTERVAL_MS);
++		add_timer(&ts->timer);
++	}
++}
++
++static void goodix_disable_irq(struct goodix_ts_data *ts)
++{
++	if (ts->client->irq) {
++		disable_irq(ts->client->irq);
++	} else {
++		del_timer(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
++}
++
+ static void goodix_free_irq(struct goodix_ts_data *ts)
+ {
+-	devm_free_irq(&ts->client->dev, ts->client->irq, ts);
++	if (ts->client->irq) {
++		devm_free_irq(&ts->client->dev, ts->client->irq, ts);
++	} else {
++		del_timer(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
+ }
+ 
+ static int goodix_request_irq(struct goodix_ts_data *ts)
+ {
+-	return devm_request_threaded_irq(&ts->client->dev, ts->client->irq,
+-					 NULL, goodix_ts_irq_handler,
+-					 ts->irq_flags, ts->client->name, ts);
++	if (ts->client->irq) {
++		return devm_request_threaded_irq(&ts->client->dev, ts->client->irq,
++						 NULL, goodix_ts_irq_handler,
++						 ts->irq_flags, ts->client->name, ts);
++	} else {
++		INIT_WORK(&ts->work_i2c_poll,
++			  goodix_ts_work_i2c_poll);
++		timer_setup(&ts->timer, goodix_ts_irq_poll_timer, 0);
++		if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE)
++			goodix_enable_irq(ts);
++		return 0;
++	}
+ }
+ 
+ static int goodix_check_cfg_8(struct goodix_ts_data *ts, const u8 *cfg, int len)
+@@ -1141,7 +1194,10 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
+ 		return -ENOMEM;
+ 	}
+ 
+-	ts->input_dev->name = "Goodix Capacitive TouchScreen";
++	snprintf(ts->name, GOODIX_NAME_MAX_LEN, "%s Goodix Capacitive TouchScreen",
++		 dev_name(&ts->client->dev));
++
++	ts->input_dev->name = ts->name;
+ 	ts->input_dev->phys = "input/ts";
+ 	ts->input_dev->id.bustype = BUS_I2C;
+ 	ts->input_dev->id.vendor = 0x0416;
+@@ -1407,6 +1463,11 @@ static void goodix_ts_remove(struct i2c_client *client)
+ {
+ 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+ 
++	if (!client->irq) {
++		del_timer(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
++
+ 	if (ts->load_cfg_from_disk)
+ 		wait_for_completion(&ts->firmware_loading_complete);
+ }
+@@ -1422,7 +1483,7 @@ static int goodix_suspend(struct device *dev)
+ 
+ 	/* We need gpio pins to suspend/resume */
+ 	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
+-		disable_irq(client->irq);
++		goodix_disable_irq(ts);
+ 		return 0;
+ 	}
+ 
+@@ -1466,7 +1527,7 @@ static int goodix_resume(struct device *dev)
+ 	int error;
+ 
+ 	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
+-		enable_irq(client->irq);
++		goodix_enable_irq(ts);
+ 		return 0;
+ 	}
+ 
+diff --git a/drivers/input/touchscreen/goodix.h b/drivers/input/touchscreen/goodix.h
+index 87797cc88b32..235dd5f264c5 100644
+--- a/drivers/input/touchscreen/goodix.h
++++ b/drivers/input/touchscreen/goodix.h
+@@ -57,6 +57,8 @@
+ #define GOODIX_CONFIG_MAX_LENGTH		240
+ #define GOODIX_MAX_KEYS				7
+ 
++#define GOODIX_NAME_MAX_LEN			38
++
+ enum goodix_irq_pin_access_method {
+ 	IRQ_PIN_ACCESS_NONE,
+ 	IRQ_PIN_ACCESS_GPIO,
+@@ -91,6 +93,7 @@ struct goodix_ts_data {
+ 	enum gpiod_flags gpiod_rst_flags;
+ 	char id[GOODIX_ID_MAX_LEN + 1];
+ 	char cfg_name[64];
++	char name[GOODIX_NAME_MAX_LEN];
+ 	u16 version;
+ 	bool reset_controller_at_probe;
+ 	bool load_cfg_from_disk;
+@@ -104,6 +107,8 @@ struct goodix_ts_data {
+ 	u8 main_clk[GOODIX_MAIN_CLK_LEN];
+ 	int bak_ref_len;
+ 	u8 *bak_ref;
++	struct timer_list timer;
++	struct work_struct work_i2c_poll;
+ };
+ 
+ int goodix_i2c_read(struct i2c_client *client, u16 reg, u8 *buf, int len);
+diff --git a/include/linux/mfd/atmel-hlcdc.h b/include/linux/mfd/atmel-hlcdc.h
+index 19504d3ea12c..2425e607c4d1 100644
+--- a/include/linux/mfd/atmel-hlcdc.h
++++ b/include/linux/mfd/atmel-hlcdc.h
+@@ -27,7 +27,7 @@
+ #define ATMEL_HLCDC_PP			BIT(10)
+ #define ATMEL_HLCDC_VSPSU		BIT(12)
+ #define ATMEL_HLCDC_VSPHO		BIT(13)
+-#define ATMEL_HLCDC_GUARDTIME_MASK	GENMASK(20, 16)
++#define ATMEL_HLCDC_GUARDTIME_MASK	GENMASK(23, 16)
+ 
+ #define ATMEL_HLCDC_EN			0x20
+ #define ATMEL_HLCDC_DIS			0x24

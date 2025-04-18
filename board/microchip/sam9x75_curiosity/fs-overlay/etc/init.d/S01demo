@@ -1,0 +1,4 @@
+#!/bin/sh
+printf "Launch EGT\n"
+cd /root
+./rounddash /dev/ttyS1 &

@@ -1,0 +1,21 @@
+diff --git a/src/draw.c b/src/draw.c
+index 8108e86..c311680 100644
+--- a/src/draw.c
++++ b/src/draw.c
+@@ -322,6 +322,7 @@ scale_surface(cairo_surface_t *old_surface,
+ 
+ int render_fb_image(struct kms_framebuffer* fb, const char* filename)
+ {
++#if 0
+ 	void* ptr;
+ 	int err;
+ 	cairo_t* cr;
+@@ -369,7 +370,7 @@ int render_fb_image(struct kms_framebuffer* fb, const char* filename)
+ 	cairo_destroy(cr);
+ 
+ 	kms_framebuffer_unmap(fb);
+-
++#endif
+ 	return 0;
+ }
+ 

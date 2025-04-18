@@ -4,8 +4,8 @@
 #
 ################################################################################
 
-EGT_VERSION = 1.9
-EGT_SITE = https://github.com/linux4sam/egt.git
+EGT_VERSION = ANCS
+EGT_SITE = https://github.com/wayne-jia/egt.git
 EGT_SITE_METHOD = git
 EGT_GIT_SUBMODULES = YES
 EGT_LICENSE = Apache-2.0
